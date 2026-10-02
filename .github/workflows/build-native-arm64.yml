@@ -2,12 +2,6 @@ name: build-native-arm64
 
 on:
   workflow_dispatch:
-    inputs:
-      source_ref:
-        description: AOSP tag/ref to build
-        required: true
-        default: platform-tools-35.0.1
-        type: string
 
 permissions:
   contents: read
@@ -36,7 +30,7 @@ jobs:
       - name: Verify source allowlist and native runner
         shell: bash
         env:
-          AOSP_BRANCH: ${{ inputs.source_ref }}
+          AOSP_BRANCH: platform-tools-35.0.1
         run: |
           set -euo pipefail
           test "$(uname -s)" = Linux
@@ -59,7 +53,7 @@ jobs:
       - name: Fetch pinned AOSP tag
         shell: bash
         env:
-          AOSP_BRANCH: ${{ inputs.source_ref }}
+          AOSP_BRANCH: platform-tools-35.0.1
           SRC_DIR: ${{ github.workspace }}/src
           REPOS_JSON: ${{ github.workspace }}/repos.json
           PATCH_DIR: ${{ github.workspace }}/patches
@@ -100,7 +94,7 @@ jobs:
       - name: Upload native aapt2
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: aapt2-linux-arm64-${{ inputs.source_ref }}
+          name: aapt2-linux-arm64-platform-tools-35.0.1
           path: out/linux-arm64/
           if-no-files-found: error
           retention-days: 7
