@@ -1,0 +1,106 @@
+name: build-native-arm64
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: AOSP tag/ref to build
+        required: true
+        default: platform-tools-35.0.1
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Checkout build scripts
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 1
+
+      - name: Install official Ubuntu build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bison build-essential ca-certificates cmake flex g++ git \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libssl-dev ninja-build pkg-config protobuf-compiler \
+            python3 zlib1g-dev
+
+      - name: Verify source allowlist and native runner
+        shell: bash
+        env:
+          AOSP_BRANCH: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = aarch64
+          python3 - <<'PY'
+          import json
+          from urllib.parse import urlparse
+          repos = json.load(open("repos.json"))
+          assert repos, "empty repo list"
+          for repo in repos:
+              u = urlparse(repo["url"])
+              assert u.scheme == "https", repo["url"]
+              assert u.hostname == "android.googlesource.com", repo["url"]
+          print(f"validated {len(repos)} official AOSP repositories")
+          PY
+          command -v aarch64-linux-gnu-g++
+          command -v protoc
+          command -v ninja
+
+      - name: Fetch pinned AOSP tag
+        shell: bash
+        env:
+          AOSP_BRANCH: ${{ inputs.source_ref }}
+          SRC_DIR: ${{ github.workspace }}/src
+          REPOS_JSON: ${{ github.workspace }}/repos.json
+          PATCH_DIR: ${{ github.workspace }}/patches
+          JOBS: "2"
+        run: |
+          set -euo pipefail
+          python3 scripts/fetch_sources.py
+          while IFS= read -r gitdir; do
+            repo_dir="${gitdir%/.git}"
+            printf '%s ' "$repo_dir"
+            git -C "$repo_dir" rev-parse HEAD
+          done < <(find "$SRC_DIR" -mindepth 2 -maxdepth 2 -type d -name .git | sort)
+
+      - name: Build native ARM64 aapt2
+        shell: bash
+        env:
+          TARGETS: aapt2
+          JOBS: "2"
+          WORKSPACE: ${{ github.workspace }}
+          OUT_DIR: ${{ github.workspace }}/out/linux-arm64
+        run: |
+          set -euo pipefail
+          python3 scripts/build_linux_arm64.py
+
+      - name: Verify artifact architecture and behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x out/linux-arm64/aapt2
+          file out/linux-arm64/aapt2
+          readelf -h out/linux-arm64/aapt2 | tee /tmp/aapt2-elf.txt
+          grep -q 'AArch64' /tmp/aapt2-elf.txt
+          ! grep -q 'X86-64' /tmp/aapt2-elf.txt
+          readelf -d out/linux-arm64/aapt2
+          out/linux-arm64/aapt2 version
+          sha256sum out/linux-arm64/aapt2 | tee out/linux-arm64/SHA256SUMS
+
+      - name: Upload native aapt2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: aapt2-linux-arm64-${{ inputs.source_ref }}
+          path: out/linux-arm64/
+          if-no-files-found: error
+          retention-days: 7
